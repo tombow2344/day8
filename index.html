@@ -137,6 +137,12 @@
         <div class="placeholder">준비 중입니다. 숫자 카드와 7일 매출 그래프가 여기에 들어갑니다.</div>
       </section>
 
+      <!-- 아직 만들지 않은 페이지를 눌렀을 때 -->
+      <section class="home" id="soon" hidden>
+        <h1 id="soonTitle"></h1>
+        <div class="placeholder">준비 중입니다.</div>
+      </section>
+
       <!-- 나머지 4개 메뉴는 이 iframe에서 열린다 -->
       <iframe class="frame" id="frame" title="화면" hidden></iframe>
     </main>
@@ -153,9 +159,23 @@
 
   const links = document.querySelectorAll(".menu a");
   const home = document.getElementById("home");
+  const soon = document.getElementById("soon");
+  const soonTitle = document.getElementById("soonTitle");
   const frame = document.getElementById("frame");
+  let latest = 0;
 
-  function show() {
+  // 파일이 아직 없으면(404) false. 파일을 직접 연 경우처럼 확인할 수 없으면 true로 보고 그냥 연다.
+  async function pageExists(url) {
+    try {
+      const res = await fetch(url, { method: "HEAD" });
+      return res.ok;
+    } catch (e) {
+      return true;
+    }
+  }
+
+  async function show() {
+    const mine = ++latest;
     let key = location.hash.slice(1);
     if (!(key in PAGES)) key = "home";
 
@@ -164,12 +184,25 @@
       else a.removeAttribute("aria-current");
     });
 
-    const isHome = key === "home";
-    home.hidden = !isHome;
-    frame.hidden = isHome;
-    if (!isHome) {
-      frame.title = document.querySelector('.menu a[data-page="' + key + '"]').textContent;
+    if (key === "home") {
+      home.hidden = false;
+      soon.hidden = true;
+      frame.hidden = true;
+      return;
+    }
+
+    const label = document.querySelector('.menu a[data-page="' + key + '"]').textContent;
+    const exists = await pageExists(PAGES[key]);
+    if (mine !== latest) return; // 기다리는 사이 다른 메뉴를 눌렀다
+
+    home.hidden = true;
+    soon.hidden = exists;
+    frame.hidden = !exists;
+    if (exists) {
+      frame.title = label;
       frame.src = PAGES[key];
+    } else {
+      soonTitle.textContent = label;
     }
   }
 
