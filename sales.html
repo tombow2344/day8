@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>매출</title>
+<style>
+  /* ===== 공통 스타일: 5개 페이지가 같은 값을 쓴다. 바꾸면 모든 파일에 똑같이 반영할 것 ===== */
+  :root {
+    --color-bg: #faf6f0;
+    --color-surface: #ffffff;
+    --color-primary: #6f4e37;
+    --color-primary-soft: #efe4d8;
+    --color-accent: #c8553d;
+    --color-text: #2f2520;
+    --color-muted: #7a6b60;
+    --color-border: #e6dccf;
+    --font-base: "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+    --radius: 12px;
+  }
+  /* ===== 공통 스타일 끝 ===== */
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+
+  body {
+    margin: 0;
+    padding: 32px;
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-base);
+    font-size: 16px;
+    line-height: 1.5;
+  }
+  h1 { margin: 0 0 4px; font-size: 26px; }
+  h2 { margin: 0; font-size: 18px; }
+  .sub { margin: 0; color: var(--color-muted); }
+
+  .card {
+    margin-top: 24px;
+    padding: 20px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+  }
+  .card h2 { margin-bottom: 12px; }
+
+  /* 입력칸 */
+  .fields { display: grid; grid-template-columns: minmax(200px, 3fr) minmax(100px, 1fr); gap: 12px; }
+  .field label { display: block; margin-bottom: 4px; font-size: 14px; color: var(--color-muted); }
+  .field input,
+  .field select {
+    width: 100%;
+    padding: 10px 12px;
+    font: inherit;
+    color: var(--color-text);
+    background: #fff;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+  }
+  .field input:focus-visible,
+  .field select:focus-visible,
+  button:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; }
+
+  .preview { margin: 14px 0 0; min-height: 1.5em; font-size: 18px; font-weight: 700; color: var(--color-primary); }
+
+  /* 버튼 */
+  button {
+    padding: 10px 18px;
+    font: inherit;
+    font-weight: 700;
+    border-radius: 8px;
+    border: 1px solid var(--color-primary);
+    background: var(--color-primary);
+    color: #fff;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .actions { display: flex; gap: 8px; margin-top: 14px; }
+
+  /* 오늘 판매 내역 */
+  .today-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 4px 16px;
+    margin-top: 28px;
+  }
+  .total { color: var(--color-muted); }
+  .total strong { color: var(--color-text); font-size: 18px; }
+  .list { display: grid; gap: 8px; margin-top: 12px; }
+  .row {
+    display: grid;
+    grid-template-columns: 56px 1fr auto;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+  }
+  .row .time { color: var(--color-muted); font-variant-numeric: tabular-nums; }
+  .row .amount { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  /* 안내 문구 */
+  .status { margin-top: 16px; min-height: 1.5em; color: var(--color-muted); }
+  .status.error { color: var(--color-accent); font-weight: 700; }
+  .empty {
+    padding: 32px 16px;
+    text-align: center;
+    color: var(--color-muted);
+    background: var(--color-surface);
+    border: 1px dashed var(--color-border);
+    border-radius: var(--radius);
+  }
+
+  @media (max-width: 640px) {
+    body { padding: 20px 16px; }
+    .card { padding: 16px; }
+    .fields { grid-template-columns: 1fr; }
+    .row { grid-template-columns: 48px 1fr auto; padding: 12px; }
+  }
+</style>
+</head>
+<body>
+  <h1>매출</h1>
+  <p class="sub">판매를 입력하고 오늘 판매 내역을 확인합니다.</p>
+
+  <form class="card" id="saleForm">
+    <h2>판매 입력</h2>
+    <div class="fields">
+      <div class="field"><label for="menu">메뉴</label><select id="menu" required></select></div>
+      <div class="field"><label for="qty">수량</label><input id="qty" type="number" min="1" step="1" value="1" required></div>
+    </div>
+    <p class="preview" id="preview" aria-live="polite"></p>
+    <div class="actions"><button type="submit" id="saleBtn">판매 입력</button></div>
+  </form>
+
+  <div class="status" id="status" role="status" aria-live="polite"></div>
+
+  <div class="today-head">
+    <h2>오늘 판매 내역</h2>
+    <span class="total" id="total"></span>
+  </div>
+  <div class="list" id="list"></div>
+
+<script>
+  // Supabase 프로젝트 주소와 공개용(anon/publishable) 키를 넣는다. 비밀 키(service role)는 절대 넣지 않는다.
+  const SUPABASE_URL = "https://fcfeyfkjnitinwdgnjqg.supabase.co";
+  const SUPABASE_KEY = "sb_publishable_yP7jI9WjuJzenQDGPu106A_BOf34awW";
+
+  const menuEl = document.getElementById("menu");
+  const qtyEl = document.getElementById("qty");
+  const previewEl = document.getElementById("preview");
+  const saleForm = document.getElementById("saleForm");
+  const saleBtn = document.getElementById("saleBtn");
+  const statusEl = document.getElementById("status");
+  const totalEl = document.getElementById("total");
+  const listEl = document.getElementById("list");
+
+  let menus = [];
+
+  function won(n) { return n.toLocaleString("ko-KR") + "원"; }
+
+  function setStatus(message, isError) {
+    statusEl.textContent = message || "";
+    statusEl.classList.toggle("error", Boolean(isError));
+  }
+
+  async function api(path, options = {}) {
+    let res;
+    try {
+      res = await fetch(SUPABASE_URL + "/rest/v1/" + path, {
+        ...options,
+        headers: {
+          apikey: SUPABASE_KEY,
+          "Content-Type": "application/json",
+          Prefer: "return=representation",
+          ...(options.headers || {})
+        }
+      });
+    } catch (e) {
+      throw new Error("서버에 연결하지 못했습니다. 인터넷 연결과 Supabase 주소를 확인하세요.");
+    }
+    if (!res.ok) {
+      let detail = "";
+      try { detail = (await res.json()).message || ""; } catch (e) {}
+      throw new Error(detail || "요청에 실패했습니다 (" + res.status + ")");
+    }
+    return res.json();
+  }
+
+  function selectedMenu() {
+    return menus.find(m => String(m.id) === menuEl.value);
+  }
+
+  // 고른 메뉴에 맞춰 수량 한도와 금액 미리보기를 갱신한다.
+  function updateForm() {
+    const m = selectedMenu();
+    if (!m) {
+      previewEl.textContent = "";
+      return;
+    }
+    qtyEl.max = m.stock;
+    const qty = Number(qtyEl.value);
+    previewEl.textContent = Number.isInteger(qty) && qty > 0
+      ? won(m.price) + " × " + qty + " = " + won(m.price * qty)
+      : "";
+  }
+
+  function renderMenus() {
+    const previous = menuEl.value;
+    menuEl.replaceChildren();
+
+    if (menus.length === 0) {
+      const o = document.createElement("option");
+      o.textContent = "등록된 메뉴가 없습니다";
+      menuEl.append(o);
+      menuEl.disabled = qtyEl.disabled = saleBtn.disabled = true;
+      setStatus("먼저 「메뉴·재고」에서 메뉴를 등록하세요.");
+      updateForm();
+      return;
+    }
+
+    menuEl.disabled = qtyEl.disabled = false;
+    for (const m of menus) {
+      const o = document.createElement("option");
+      o.value = m.id;
+      o.disabled = m.stock <= 0;
+      o.textContent = m.name + " · " + won(m.price) + " · " + (m.stock <= 0 ? "품절" : "재고 " + m.stock);
+      menuEl.append(o);
+    }
+
+    // 이전에 고른 메뉴를 유지하고, 없거나 품절이면 팔 수 있는 첫 메뉴를 고른다.
+    const keep = menus.find(m => String(m.id) === previous && m.stock > 0);
+    const first = keep || menus.find(m => m.stock > 0);
+    if (first) {
+      menuEl.value = first.id;
+      saleBtn.disabled = false;
+    } else {
+      saleBtn.disabled = true;
+      setStatus("판매할 수 있는 메뉴가 없습니다. 「메뉴·재고」에서 재고를 채워 주세요.");
+    }
+    updateForm();
+  }
+
+  function renderSales(sales) {
+    const sum = sales.reduce((acc, s) => acc + s.amount, 0);
+    totalEl.replaceChildren();
+    const strong = document.createElement("strong");
+    strong.textContent = won(sum);
+    totalEl.append("총 " + sales.length + "건 · 합계 ", strong);
+
+    if (sales.length === 0) {
+      const div = document.createElement("div");
+      div.className = "empty";
+      div.textContent = "오늘 판매 내역이 없습니다.";
+      listEl.replaceChildren(div);
+      return;
+    }
+
+    listEl.replaceChildren(...sales.map(s => {
+      const row = document.createElement("div");
+      row.className = "row";
+      const time = document.createElement("span");
+      time.className = "time";
+      time.textContent = new Date(s.sold_at).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false });
+      const name = document.createElement("span");
+      name.textContent = s.menu_name + " × " + s.quantity;
+      const amount = document.createElement("span");
+      amount.className = "amount";
+      amount.textContent = won(s.amount);
+      row.append(time, name, amount);
+      return row;
+    }));
+  }
+
+  async function load() {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const [m, s] = await Promise.all([
+      api("menu_items?select=*&order=id.asc"),
+      api("sales?select=*&sold_at=gte." + encodeURIComponent(start.toISOString()) + "&order=sold_at.desc")
+    ]);
+    menus = m;
+    renderMenus();
+    renderSales(s);
+  }
+
+  menuEl.addEventListener("change", updateForm);
+  qtyEl.addEventListener("input", updateForm);
+
+  saleForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const m = selectedMenu();
+    const qty = Number(qtyEl.value);
+    if (!m) return;
+    if (!Number.isInteger(qty) || qty < 1) {
+      setStatus("수량은 1 이상의 정수로 입력하세요.", true);
+      return;
+    }
+    if (qty > m.stock) {
+      setStatus("재고가 부족합니다. (남은 재고 " + m.stock + "개)", true);
+      return;
+    }
+
+    saleBtn.disabled = true;
+    try {
+      const sale = await api("rpc/record_sale", {
+        method: "POST",
+        body: JSON.stringify({ p_menu_item_id: m.id, p_quantity: qty })
+      });
+      qtyEl.value = 1;
+      await load();
+      const left = menus.find(x => x.id === sale.menu_item_id);
+      setStatus("'" + sale.menu_name + "' " + sale.quantity + "개 판매 입력했습니다." + (left ? " (남은 재고 " + left.stock + "개)" : ""));
+    } catch (err) {
+      setStatus(err.message, true);
+      try { await load(); } catch (e2) {}
+    } finally {
+      saleBtn.disabled = menus.length === 0 || !menus.some(x => x.stock > 0);
+    }
+  });
+
+  setStatus("불러오는 중...");
+  load().then(() => {
+    if (statusEl.textContent === "불러오는 중...") setStatus("");
+  }).catch(err => setStatus(err.message, true));
+</script>
+</body>
+</html>
