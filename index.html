@@ -92,6 +92,71 @@
     color: var(--color-muted);
   }
 
+  /* 홈: 숫자 카드 */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-top: 24px;
+  }
+  .stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 18px 20px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+  }
+  .stat-label { font-size: 14px; color: var(--color-muted); }
+  .stat-value { font-size: 28px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+  .stat-note { min-height: 1.5em; font-size: 14px; color: var(--color-muted); }
+  .stat.warn { border-color: var(--color-accent); }
+  .stat.warn .stat-value { color: var(--color-accent); }
+
+  /* 홈: 7일 매출 그래프 (div로 직접 그린다) */
+  .panel {
+    margin-top: 12px;
+    padding: 20px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+  }
+  .panel h2 { margin: 0 0 16px; font-size: 18px; }
+  .chart {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 8px;
+    height: 240px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .chart li { display: flex; flex-direction: column; min-width: 0; }
+  .chart .val {
+    font-size: 13px;
+    text-align: center;
+    color: var(--color-muted);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .chart .bar-area { position: relative; flex: 1; border-bottom: 1px solid var(--color-border); }
+  .chart .bar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: color-mix(in srgb, var(--color-primary) 65%, white);
+    border-radius: 6px 6px 0 0;
+  }
+  .chart .day { padding-top: 6px; font-size: 13px; line-height: 1.3; text-align: center; color: var(--color-muted); }
+  .chart li.today .bar { background: var(--color-primary); }
+  .chart li.today .val,
+  .chart li.today .day { color: var(--color-text); font-weight: 700; }
+
+  .home-status { margin-top: 16px; min-height: 1.5em; color: var(--color-muted); }
+  .home-status.error { color: var(--color-accent); font-weight: 700; }
+
   /* 좁은 화면: 메뉴를 위로 */
   @media (max-width: 640px) {
     .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
@@ -130,11 +195,33 @@
     </aside>
 
     <main class="content">
-      <!-- 홈: 4단계에서 숫자 카드와 7일 매출 그래프가 들어갈 자리 -->
+      <!-- 홈: 숫자 카드와 7일 매출 그래프 -->
       <section class="home" id="home">
         <h1>오늘의 가게</h1>
-        <p>오늘 장사를 한눈에 확인하는 화면입니다.</p>
-        <div class="placeholder">준비 중입니다. 숫자 카드와 7일 매출 그래프가 여기에 들어갑니다.</div>
+        <p id="todayLabel"></p>
+
+        <div class="cards">
+          <div class="stat">
+            <span class="stat-label">오늘 매출</span>
+            <strong class="stat-value" id="statSales">–</strong>
+          </div>
+          <div class="stat">
+            <span class="stat-label">오늘 판매 건수</span>
+            <strong class="stat-value" id="statCount">–</strong>
+          </div>
+          <div class="stat" id="statLowCard">
+            <span class="stat-label">재고 부족 메뉴</span>
+            <strong class="stat-value" id="statLow">–</strong>
+            <span class="stat-note" id="statLowNote"></span>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>최근 7일 매출</h2>
+          <ol class="chart" id="chart" aria-label="최근 7일 날짜별 매출"></ol>
+        </div>
+
+        <div class="home-status" id="homeStatus" role="status" aria-live="polite"></div>
       </section>
 
       <!-- 아직 만들지 않은 페이지를 눌렀을 때 -->
@@ -164,6 +251,129 @@
   const frame = document.getElementById("frame");
   let latest = 0;
 
+  // Supabase 프로젝트 주소와 공개용(anon/publishable) 키. 비밀 키(service role)는 절대 넣지 않는다.
+  const SUPABASE_URL = "https://fcfeyfkjnitinwdgnjqg.supabase.co";
+  const SUPABASE_KEY = "sb_publishable_yP7jI9WjuJzenQDGPu106A_BOf34awW";
+  const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
+  let homeLatest = 0;
+
+  function won(n) { return n.toLocaleString("ko-KR") + "원"; }
+  // 그래프 칸이 좁아서 1만 이상은 「1.2만」처럼 줄여 쓴다.
+  function compactWon(n) {
+    return n >= 10000 ? (Math.round(n / 1000) / 10).toLocaleString("ko-KR") + "만" : n.toLocaleString("ko-KR");
+  }
+  function dayKey(d) {
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  async function api(path, options = {}) {
+    let res;
+    try {
+      res = await fetch(SUPABASE_URL + "/rest/v1/" + path, {
+        ...options,
+        headers: { apikey: SUPABASE_KEY, "Content-Type": "application/json", ...(options.headers || {}) }
+      });
+    } catch (e) {
+      throw new Error("서버에 연결하지 못했습니다. 인터넷 연결과 Supabase 주소를 확인하세요.");
+    }
+    if (!res.ok) {
+      let detail = "";
+      try { detail = (await res.json()).message || ""; } catch (e) {}
+      throw new Error(detail || "요청에 실패했습니다 (" + res.status + ")");
+    }
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
+  }
+
+  function renderCards(todaySales, menus) {
+    document.getElementById("statSales").textContent = won(todaySales.total);
+    document.getElementById("statCount").textContent = todaySales.cnt + "건";
+
+    const low = menus.filter(m => m.stock <= m.low_stock_threshold);
+    document.getElementById("statLow").textContent = low.length + "개";
+    document.getElementById("statLowCard").classList.toggle("warn", low.length > 0);
+    const names = low.slice(0, 3).map(m => m.name).join(", ");
+    document.getElementById("statLowNote").textContent =
+      low.length > 0 ? names + (low.length > 3 ? " 외 " + (low.length - 3) + "개" : "")
+      : menus.length > 0 ? "모든 메뉴 재고 충분" : "등록된 메뉴 없음";
+  }
+
+  function renderChart(series) {
+    const max = Math.max(...series.map(s => s.total));
+    document.getElementById("chart").replaceChildren(...series.map((s, i) => {
+      const isToday = i === series.length - 1;
+      const weekday = WEEKDAYS[s.date.getDay()];
+      const li = document.createElement("li");
+      if (isToday) li.className = "today";
+      li.title = (s.date.getMonth() + 1) + "월 " + s.date.getDate() + "일 (" + weekday + ") " + won(s.total) + " · " + s.cnt + "건";
+
+      const val = document.createElement("span");
+      val.className = "val";
+      val.textContent = compactWon(s.total);
+
+      const area = document.createElement("div");
+      area.className = "bar-area";
+      const bar = document.createElement("div");
+      bar.className = "bar";
+      bar.setAttribute("aria-hidden", "true");
+      bar.style.height = max > 0 && s.total > 0 ? Math.max((s.total / max) * 100, 2) + "%" : "0";
+      area.append(bar);
+
+      const day = document.createElement("span");
+      day.className = "day";
+      day.append(isToday ? "오늘" : (s.date.getMonth() + 1) + "/" + s.date.getDate(), document.createElement("br"), weekday);
+
+      li.append(val, area, day);
+      return li;
+    }));
+  }
+
+  // 홈을 보여 줄 때마다 최신 숫자를 다시 불러온다.
+  async function loadHome() {
+    const mine = ++homeLatest;
+    const status = document.getElementById("homeStatus");
+    const now = new Date();
+    document.getElementById("todayLabel").textContent =
+      now.getFullYear() + "년 " + (now.getMonth() + 1) + "월 " + now.getDate() + "일 " + WEEKDAYS[now.getDay()] + "요일";
+
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - i);
+      days.push(d);
+    }
+
+    status.className = "home-status";
+    status.textContent = "불러오는 중...";
+    try {
+      const [rows, menus] = await Promise.all([
+        api("rpc/sales_by_day", {
+          method: "POST",
+          body: JSON.stringify({
+            p_from: days[0].toISOString(),
+            p_tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Seoul"
+          })
+        }),
+        api("menu_items?select=name,stock,low_stock_threshold&order=id.asc")
+      ]);
+      if (mine !== homeLatest) return;
+
+      const byDay = new Map(rows.map(r => [r.day, r]));
+      const series = days.map(d => {
+        const r = byDay.get(dayKey(d));
+        return { date: d, total: r ? r.total : 0, cnt: r ? r.cnt : 0 };
+      });
+      renderCards(series[series.length - 1], menus);
+      renderChart(series);
+      status.textContent = "";
+    } catch (err) {
+      if (mine !== homeLatest) return;
+      status.textContent = err.message;
+      status.classList.add("error");
+    }
+  }
+
   // 파일이 아직 없으면(404) false. 파일을 직접 연 경우처럼 확인할 수 없으면 true로 보고 그냥 연다.
   async function pageExists(url) {
     try {
@@ -188,6 +398,7 @@
       home.hidden = false;
       soon.hidden = true;
       frame.hidden = true;
+      loadHome();
       return;
     }
 
