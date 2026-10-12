@@ -206,8 +206,13 @@
             <strong class="stat-value" id="statSales">–</strong>
           </div>
           <div class="stat">
-            <span class="stat-label">오늘 판매 건수</span>
+            <span class="stat-label">오늘 주문 수</span>
             <strong class="stat-value" id="statCount">–</strong>
+          </div>
+          <div class="stat">
+            <span class="stat-label">평균 별점</span>
+            <strong class="stat-value" id="statRating">–</strong>
+            <span class="stat-note" id="statRatingNote"></span>
           </div>
           <div class="stat" id="statLowCard">
             <span class="stat-label">재고 부족 메뉴</span>
@@ -262,8 +267,17 @@
   function compactWon(n) {
     return n >= 10000 ? (Math.round(n / 1000) / 10).toLocaleString("ko-KR") + "만" : n.toLocaleString("ko-KR");
   }
+
+  // 「오늘」은 기기 시간대와 상관없이 한국 시간(Asia/Seoul) 기준이다.
+  // 한국 달력의 날짜를 UTC 필드에 담은 Date로 다루고, 읽을 때는 getUTC* 로 읽는다.
+  const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+  function kstDay(offsetDays) {
+    const k = new Date(Date.now() + KST_OFFSET_MS);
+    return new Date(Date.UTC(k.getUTCFullYear(), k.getUTCMonth(), k.getUTCDate() + offsetDays));
+  }
+  function kstMidnightIso(day) { return new Date(day.getTime() - KST_OFFSET_MS).toISOString(); }
   function dayKey(d) {
-    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0") + "-" + String(d.getUTCDate()).padStart(2, "0");
   }
 
   async function api(path, options = {}) {
@@ -285,9 +299,13 @@
     return text ? JSON.parse(text) : null;
   }
 
-  function renderCards(todaySales, menus) {
+  function renderCards(todaySales, menus, reviews) {
     document.getElementById("statSales").textContent = won(todaySales.total);
     document.getElementById("statCount").textContent = todaySales.cnt + "건";
+
+    const hasReviews = reviews.review_count > 0;
+    document.getElementById("statRating").textContent = hasReviews ? Number(reviews.avg_rating).toFixed(1) + "점" : "–";
+    document.getElementById("statRatingNote").textContent = hasReviews ? "리뷰 " + reviews.review_count + "개 기준" : "아직 리뷰 없음";
 
     const low = menus.filter(m => m.stock <= m.low_stock_threshold);
     document.getElementById("statLow").textContent = low.length + "개";
@@ -302,10 +320,10 @@
     const max = Math.max(...series.map(s => s.total));
     document.getElementById("chart").replaceChildren(...series.map((s, i) => {
       const isToday = i === series.length - 1;
-      const weekday = WEEKDAYS[s.date.getDay()];
+      const weekday = WEEKDAYS[s.date.getUTCDay()];
       const li = document.createElement("li");
       if (isToday) li.className = "today";
-      li.title = (s.date.getMonth() + 1) + "월 " + s.date.getDate() + "일 (" + weekday + ") " + won(s.total) + " · " + s.cnt + "건";
+      li.title = (s.date.getUTCMonth() + 1) + "월 " + s.date.getUTCDate() + "일 (" + weekday + ") " + won(s.total) + " · " + s.cnt + "건";
 
       const val = document.createElement("span");
       val.className = "val";
@@ -321,7 +339,7 @@
 
       const day = document.createElement("span");
       day.className = "day";
-      day.append(isToday ? "오늘" : (s.date.getMonth() + 1) + "/" + s.date.getDate(), document.createElement("br"), weekday);
+      day.append(isToday ? "오늘" : (s.date.getUTCMonth() + 1) + "/" + s.date.getUTCDate(), document.createElement("br"), weekday);
 
       li.append(val, area, day);
       return li;
@@ -332,30 +350,23 @@
   async function loadHome() {
     const mine = ++homeLatest;
     const status = document.getElementById("homeStatus");
-    const now = new Date();
+    const today = kstDay(0);
     document.getElementById("todayLabel").textContent =
-      now.getFullYear() + "년 " + (now.getMonth() + 1) + "월 " + now.getDate() + "일 " + WEEKDAYS[now.getDay()] + "요일";
+      today.getUTCFullYear() + "년 " + (today.getUTCMonth() + 1) + "월 " + today.getUTCDate() + "일 " + WEEKDAYS[today.getUTCDay()] + "요일";
 
     const days = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setHours(0, 0, 0, 0);
-      d.setDate(d.getDate() - i);
-      days.push(d);
-    }
+    for (let i = 6; i >= 0; i--) days.push(kstDay(-i));
 
     status.className = "home-status";
     status.textContent = "불러오는 중...";
     try {
-      const [rows, menus] = await Promise.all([
+      const [rows, menus, reviewRows] = await Promise.all([
         api("rpc/sales_by_day", {
           method: "POST",
-          body: JSON.stringify({
-            p_from: days[0].toISOString(),
-            p_tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Seoul"
-          })
+          body: JSON.stringify({ p_from: kstMidnightIso(days[0]), p_tz: "Asia/Seoul" })
         }),
-        api("menu_items?select=name,stock,low_stock_threshold&order=id.asc")
+        api("menu_items?select=name,stock,low_stock_threshold&order=id.asc"),
+        api("rpc/review_summary", { method: "POST", body: "{}" })
       ]);
       if (mine !== homeLatest) return;
 
@@ -364,7 +375,7 @@
         const r = byDay.get(dayKey(d));
         return { date: d, total: r ? r.total : 0, cnt: r ? r.cnt : 0 };
       });
-      renderCards(series[series.length - 1], menus);
+      renderCards(series[series.length - 1], menus, reviewRows[0] || { review_count: 0 });
       renderChart(series);
       status.textContent = "";
     } catch (err) {

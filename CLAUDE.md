@@ -27,5 +27,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 지켜야 할 것
 
 - anon key는 HTML에 들어가므로 누구나 볼 수 있다. 데이터 보호는 Supabase RLS에 달려 있다. AI 키와 service role key는 Edge Function secret에만 두고 HTML·문서·채팅에 적지 않는다.
+- 「오늘」과 날짜별 집계는 기기 시간대가 아니라 한국 시간(Asia/Seoul) 기준이다. `index.html`의 `kstDay()` 같은 헬퍼를 쓰고, 서버 쪽 집계 함수(`sales_by_day`)에는 `p_tz`로 `Asia/Seoul`을 넘긴다.
 - npm, 번들러, 별도 빌드 단계를 추가하지 않는다.
 - PRD.md의 「정해야 할 것」은 임의로 정하지 말고 사용자에게 확인한다. 특히 로그인 여부와 판매 입력 시 재고 자동 차감 여부는 데이터 구조에 영향을 준다.

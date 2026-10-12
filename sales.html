@@ -265,7 +265,7 @@
       row.className = "row";
       const time = document.createElement("span");
       time.className = "time";
-      time.textContent = new Date(s.sold_at).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false });
+      time.textContent = new Date(s.sold_at).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Seoul" });
       const name = document.createElement("span");
       name.textContent = s.menu_name + " × " + s.quantity;
       const amount = document.createElement("span");
@@ -277,11 +277,13 @@
   }
 
   async function load() {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
+    // 「오늘」은 기기 시간대와 상관없이 한국 시간(Asia/Seoul) 0시부터다.
+    const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+    const k = new Date(Date.now() + KST_OFFSET_MS);
+    const startIso = new Date(Date.UTC(k.getUTCFullYear(), k.getUTCMonth(), k.getUTCDate()) - KST_OFFSET_MS).toISOString();
     const [m, s] = await Promise.all([
       api("menu_items?select=*&order=id.asc"),
-      api("sales?select=*&sold_at=gte." + encodeURIComponent(start.toISOString()) + "&order=sold_at.desc")
+      api("sales?select=*&sold_at=gte." + encodeURIComponent(startIso) + "&order=sold_at.desc")
     ]);
     menus = m;
     renderMenus();
