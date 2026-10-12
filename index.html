@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>골목카페 운영 대시보드</title>
+<style>
+  /* ===== 공통 스타일: 5개 페이지가 같은 값을 쓴다. 바꾸면 모든 파일에 똑같이 반영할 것 ===== */
+  :root {
+    --color-bg: #faf6f0;
+    --color-surface: #ffffff;
+    --color-primary: #6f4e37;
+    --color-primary-soft: #efe4d8;
+    --color-accent: #c8553d;
+    --color-text: #2f2520;
+    --color-muted: #7a6b60;
+    --color-border: #e6dccf;
+    --font-base: "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+    --radius: 12px;
+  }
+  /* ===== 공통 스타일 끝 ===== */
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-base);
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  .app {
+    display: grid;
+    grid-template-columns: 230px 1fr;
+    height: 100%;
+  }
+
+  /* 왼쪽 메뉴 */
+  .sidebar {
+    background: var(--color-surface);
+    border-right: 1px solid var(--color-border);
+    padding: 24px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    overflow-y: auto;
+  }
+  .brand { padding: 0 8px; }
+  .brand strong { display: block; font-size: 22px; color: var(--color-primary); }
+  .brand span { font-size: 14px; color: var(--color-muted); }
+
+  .menu { display: flex; flex-direction: column; gap: 6px; }
+  .menu a {
+    display: block;
+    padding: 13px 16px;
+    border-radius: 10px;
+    color: var(--color-text);
+    font-size: 17px;
+    text-decoration: none;
+  }
+  .menu a:hover { background: var(--color-primary-soft); }
+  .menu a[aria-current="page"] {
+    background: var(--color-primary);
+    color: #fff;
+    font-weight: 700;
+  }
+  .menu a:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; }
+
+  /* 가운데 화면 */
+  .content { min-width: 0; min-height: 0; position: relative; }
+  .frame {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: var(--color-bg);
+  }
+
+  .home { height: 100%; overflow-y: auto; padding: 32px; }
+  .home h1 { margin: 0 0 4px; font-size: 26px; }
+  .home p { margin: 0; color: var(--color-muted); }
+  .placeholder {
+    margin-top: 24px;
+    padding: 40px 24px;
+    background: var(--color-surface);
+    border: 1px dashed var(--color-border);
+    border-radius: var(--radius);
+    text-align: center;
+    color: var(--color-muted);
+  }
+
+  /* 좁은 화면: 메뉴를 위로 */
+  @media (max-width: 640px) {
+    .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    .sidebar {
+      flex-direction: row;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-right: 0;
+      border-bottom: 1px solid var(--color-border);
+      overflow-x: auto;
+      overflow-y: hidden;
+    }
+    .brand span { display: none; }
+    .brand strong { font-size: 18px; white-space: nowrap; }
+    .menu { flex-direction: row; }
+    .menu a { padding: 10px 14px; font-size: 15px; white-space: nowrap; }
+    .home { padding: 20px 16px; }
+  }
+</style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <strong>골목카페</strong>
+        <span>운영 대시보드</span>
+      </div>
+      <nav class="menu" aria-label="메뉴">
+        <a href="#home" data-page="home">홈</a>
+        <a href="#sales" data-page="sales">매출</a>
+        <a href="#menu" data-page="menu">메뉴·재고</a>
+        <a href="#reviews" data-page="reviews">리뷰</a>
+        <a href="#promo" data-page="promo">홍보</a>
+      </nav>
+    </aside>
+
+    <main class="content">
+      <!-- 홈: 4단계에서 숫자 카드와 7일 매출 그래프가 들어갈 자리 -->
+      <section class="home" id="home">
+        <h1>오늘의 가게</h1>
+        <p>오늘 장사를 한눈에 확인하는 화면입니다.</p>
+        <div class="placeholder">준비 중입니다. 숫자 카드와 7일 매출 그래프가 여기에 들어갑니다.</div>
+      </section>
+
+      <!-- 나머지 4개 메뉴는 이 iframe에서 열린다 -->
+      <iframe class="frame" id="frame" title="화면" hidden></iframe>
+    </main>
+  </div>
+
+<script>
+  const PAGES = {
+    home: null,
+    sales: "sales.html",
+    menu: "menu.html",
+    reviews: "reviews.html",
+    promo: "promo.html"
+  };
+
+  const links = document.querySelectorAll(".menu a");
+  const home = document.getElementById("home");
+  const frame = document.getElementById("frame");
+
+  function show() {
+    let key = location.hash.slice(1);
+    if (!(key in PAGES)) key = "home";
+
+    links.forEach(a => {
+      if (a.dataset.page === key) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
+    });
+
+    const isHome = key === "home";
+    home.hidden = !isHome;
+    frame.hidden = isHome;
+    if (!isHome) {
+      frame.title = document.querySelector('.menu a[data-page="' + key + '"]').textContent;
+      frame.src = PAGES[key];
+    }
+  }
+
+  window.addEventListener("hashchange", show);
+  show();
+</script>
+</body>
+</html>
